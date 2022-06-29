@@ -8,11 +8,13 @@ import {
 } from 'pg';
 
 let transactionId = 0;
-let client: Client;
-let connectPromise: Promise<void>;
+let client: Client | undefined;
+let connectPromise: Promise<void> | undefined;
+
+const { connect, query } = Client.prototype;
+const { connect: poolConnect } = Pool.prototype;
 
 export const patchPgForTransactions = () => {
-  const { connect } = Client.prototype;
   Client.prototype.connect = async function (
     this: Client,
     callback?: (err: Error) => void,
@@ -45,7 +47,6 @@ export const patchPgForTransactions = () => {
     return connectPromise;
   };
 
-  const poolConnect = Pool.prototype.connect;
   Pool.prototype.connect = function (
     cb?: (
       err: Error,
@@ -62,7 +63,6 @@ export const patchPgForTransactions = () => {
     }
   };
 
-  const { query } = Client.prototype;
   Client.prototype.query = async function (
     inputArg: string | QueryConfig | QueryArrayConfig,
     ...args: any[]
@@ -115,6 +115,16 @@ export const patchPgForTransactions = () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (query as any).call(client, input, ...args);
   };
+};
+
+export const unpatchPgForTransactions = () => {
+  transactionId = 0;
+  client = undefined;
+  connectPromise = undefined;
+
+  Client.prototype.connect = connect;
+  Client.prototype.query = query;
+  Pool.prototype.connect = poolConnect;
 };
 
 export const startTransaction = async (db: Client) => {

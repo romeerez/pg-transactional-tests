@@ -3,11 +3,14 @@ import {
   patchPgForTransactions,
   rollbackTransaction,
   startTransaction,
+  unpatchPgForTransactions,
 } from '../src';
 
 const config = { connectionString: process.env.DATABASE_URL, max: 1 };
 const client = new Client(config);
 const pool = new Pool(config);
+const { connect: originalConnect } = client;
+const { connect: originalPoolConnect } = pool;
 
 patchPgForTransactions();
 
@@ -21,56 +24,68 @@ const getCount = async () => {
 };
 
 describe('pg-transactional-tests', () => {
-  beforeAll(async () => {
-    await startTransaction(client);
-  });
-  beforeEach(async () => {
-    await startTransaction(client);
-  });
-  afterEach(async () => {
-    await rollbackTransaction(client);
-  });
-  afterAll(async () => {
-    await rollbackTransaction(client);
-    await client.end();
-  });
-
-  it('should leave db empty after running this test', async () => {
-    await client.connect();
-    const poolClient = await pool.connect();
-    await Promise.all([client.query(insertSql), poolClient.query(insertSql)]);
-    await poolClient.release();
-    await pool.end();
-    expect(await getCount()).toBe(2);
-  });
-
-  it('should have an empty db now', async () => {
-    expect(await getCount()).toBe(0);
-  });
-
-  describe('nested describe', () => {
+  describe('patch database client', () => {
     beforeAll(async () => {
       await startTransaction(client);
-      await client.query(insertSql);
     });
-
-    afterAll(async () => {
+    beforeEach(async () => {
+      await startTransaction(client);
+    });
+    afterEach(async () => {
       await rollbackTransaction(client);
     });
+    afterAll(async () => {
+      await rollbackTransaction(client);
+      await client.end();
+    });
 
-    it('should have record created in beforeAll', async () => {
-      expect(await getCount()).toBe(1);
+    it('should leave db empty after running this test', async () => {
+      await client.connect();
+      const poolClient = await pool.connect();
+      await Promise.all([client.query(insertSql), poolClient.query(insertSql)]);
+      await poolClient.release();
+      await pool.end();
+      expect(await getCount()).toBe(2);
+    });
+
+    it('should have an empty db now', async () => {
+      expect(await getCount()).toBe(0);
+    });
+
+    describe('nested describe', () => {
+      beforeAll(async () => {
+        await startTransaction(client);
+        await client.query(insertSql);
+      });
+
+      afterAll(async () => {
+        await rollbackTransaction(client);
+      });
+
+      it('should have record created in beforeAll', async () => {
+        expect(await getCount()).toBe(1);
+      });
+    });
+
+    it('should support nested transactions, case insensitive', async () => {
+      await client.query('STaRT TRANSaCTION');
+      await client.query('COmMIT');
+      await client.query('BeGiN');
+      await client.query('ROLlBaCK');
+    });
+
+    it('should still have an empty db', async () => {
+      expect(await getCount()).toBe(0);
     });
   });
 
-  it('should support nested transactions, case insensitive', async () => {
-    await client.query('STaRT TRANSaCTION');
-    await client.query('COmMIT');
-    await client.query('BeGiN');
-    await client.query('ROLlBaCK');
-  });
+  test('unpatch database client', () => {
+    expect(client.connect).not.toBe(originalConnect);
+    expect(pool.connect).not.toBe(originalPoolConnect);
 
-  it('should still have an empty db', async () => {
-    expect(await getCount()).toBe(0);
+    unpatchPgForTransactions();
+
+    expect(client.connect).toBe(originalConnect);
+    expect(pool.connect).toBe(originalPoolConnect);
   });
 });

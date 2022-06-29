@@ -67,6 +67,29 @@ afterEach(async () => {
 });
 ```
 
+With such setup script **every** test in your project will be wrapped into transaction, but what if it's unwanted?
+
+You can define a test "hook" instead, and use it only in test suites which works with a database:
+
+```ts
+import {
+  patchPgForTransactions,
+  startTransaction,
+  rollbackTransaction,
+} from 'pg-transactional-tests';
+import { Client } from 'pg';
+
+// construct `pg` client, it's suggested to have a separate database for tests:
+export const db = new Client({
+  connectionString: process.env.DATABASE_URL_TEST,
+});
+export const useTestDatabase = () => {
+  beforeAll(() => {
+    useTestDatabase()
+  })
+}
+```
+
 ## How it works
 
 Every test is wrapped in transaction:

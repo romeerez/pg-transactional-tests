@@ -9,7 +9,7 @@
     "test": "jest --setupFiles dotenv/config",
     "build": "tsc",
     "db": "rake-db",
-    "prepublish": "build"
+    "prepublish": "tsc"
   },
   "jest": {
     "transform": {

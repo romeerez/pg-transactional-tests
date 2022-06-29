@@ -1,0 +1,46 @@
+{
+  "name": "pg-transactional-tests",
+  "version": "1.0.0",
+  "description": "Wraps each test in transaction for `pg` package",
+  "repository": "https://github.com/romeerez/pg-transactional-tests",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "test": "jest --setupFiles dotenv/config",
+    "build": "tsc",
+    "db": "rake-db",
+    "prepublish": "build"
+  },
+  "jest": {
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    }
+  },
+  "keywords": [
+    "pg",
+    "postgres",
+    "transactional tests",
+    "test"
+  ],
+  "author": "Roman Kushyn",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/jest": "^28.1.3",
+    "@types/pg": "^8.6.5",
+    "@typescript-eslint/eslint-plugin": "^5.30.0",
+    "@typescript-eslint/parser": "^5.30.0",
+    "dotenv": "^16.0.1",
+    "eslint": "^8.18.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-prettier": "^4.1.0",
+    "jest": "^28.1.1",
+    "prettier": "^2.7.1",
+    "rake-db": "^1.3.1",
+    "ts-jest": "^28.0.5",
+    "ts-node": "^10.8.1",
+    "typescript": "^4.7.4"
+  },
+  "peerDependencies": {
+    "pg": "*"
+  }
+}

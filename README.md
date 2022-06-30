@@ -76,16 +76,27 @@ import {
   patchPgForTransactions,
   startTransaction,
   rollbackTransaction,
+  unpatchPgForTransactions,
 } from 'pg-transactional-tests';
-import { Client } from 'pg';
+import {Client} from 'pg';
 
 // construct `pg` client, it's suggested to have a separate database for tests:
 export const db = new Client({
   connectionString: process.env.DATABASE_URL_TEST,
 });
+
 export const useTestDatabase = () => {
   beforeAll(() => {
-    useTestDatabase()
+    patchPgForTransactions()
+  })
+  beforeEach(async () => {
+    await startTransaction()
+  })
+  afterEach(async () => {
+    await rollbackTransaction()
+  })
+  afterAll(() => {
+    unpatchPgForTransactions()
   })
 }
 ```

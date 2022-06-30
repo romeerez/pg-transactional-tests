@@ -1,6 +1,6 @@
 {
   "name": "pg-transactional-tests",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Wraps each test in transaction for `pg` package",
   "repository": "https://github.com/romeerez/pg-transactional-tests",
   "main": "dist/index.js",

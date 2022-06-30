@@ -90,10 +90,10 @@ export const useTestDatabase = () => {
     patchPgForTransactions()
   })
   beforeEach(async () => {
-    await startTransaction()
+    await startTransaction(db)
   })
   afterEach(async () => {
-    await rollbackTransaction()
+    await rollbackTransaction(db)
   })
   afterAll(() => {
     unpatchPgForTransactions()

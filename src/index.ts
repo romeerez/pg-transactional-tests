@@ -127,10 +127,10 @@ export const unpatchPgForTransactions = () => {
   Pool.prototype.connect = poolConnect;
 };
 
-export const startTransaction = async (db: Client) => {
-  await db.query('BEGIN');
+export const startTransaction = async (db?: Client) => {
+  await (db || client)?.query('BEGIN');
 };
 
-export const rollbackTransaction = async (db: Client) => {
-  await db.query('ROLLBACK');
+export const rollbackTransaction = async (db?: Client) => {
+  await (db || client)?.query('ROLLBACK');
 };

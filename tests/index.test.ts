@@ -25,17 +25,11 @@ const getCount = async () => {
 
 describe('pg-transactional-tests', () => {
   describe('patch database client', () => {
-    beforeAll(async () => {
-      await startTransaction(client);
-    });
-    beforeEach(async () => {
-      await startTransaction(client);
-    });
-    afterEach(async () => {
-      await rollbackTransaction(client);
-    });
+    beforeAll(startTransaction);
+    beforeEach(startTransaction);
+    afterEach(rollbackTransaction);
     afterAll(async () => {
-      await rollbackTransaction(client);
+      await rollbackTransaction();
       await client.end();
     });
 
@@ -54,12 +48,12 @@ describe('pg-transactional-tests', () => {
 
     describe('nested describe', () => {
       beforeAll(async () => {
-        await startTransaction(client);
+        await startTransaction();
         await client.query(insertSql);
       });
 
       afterAll(async () => {
-        await rollbackTransaction(client);
+        await rollbackTransaction();
       });
 
       it('should have record created in beforeAll', async () => {

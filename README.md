@@ -20,6 +20,7 @@ Install:
 pnpm i -D pg-transactional-tests
 ```
 
+## Use for all tests
 
 If you're using Jest, create a script for setup, add it to jest config ("jest" section in package.json):
 
@@ -45,29 +46,32 @@ import {
   startTransaction,
   rollbackTransaction,
 } from 'pg-transactional-tests';
-import { Client } from 'pg';
 
-// construct `pg` client, it's suggested to have a separate database for tests:
-export const db = new Client({
-  connectionString: process.env.DATABASE_URL_TEST,
-});
+// import instance of your query builder, ORM, something which has `.close` or `.end` or `.destroy` method
+import db from './path-to-your-db'
 
 // patch client, this is changing prototype of Client and Pool of `pg`,
 // so every instance of `pg` in your app becomes patched
 patchPgForTransactions();
 
+// start transaction before all tests:
+beforeAll(startTransaction)
+
 // start transaction before each test:
-beforeEach(async () => {
-  await startTransaction(db);
-});
+beforeEach(startTransaction);
 
 // rollback transaction after each test:
+afterEach(rollbackTransaction);
+
 afterEach(async () => {
-  await rollbackTransaction(db);
+  // rollback transaction after all tests:
+  await rollbackTransaction()
+  // end database connection:
+  await db.close()
 });
 ```
 
-With such setup script **every** test in your project will be wrapped into transaction, but what if it's unwanted?
+## Use it only in some tests
 
 You can define a test "hook" instead, and use it only in test suites which works with a database:
 
@@ -76,34 +80,29 @@ import {
   patchPgForTransactions,
   startTransaction,
   rollbackTransaction,
-  unpatchPgForTransactions,
 } from 'pg-transactional-tests';
-import {Client} from 'pg';
 
-// construct `pg` client, it's suggested to have a separate database for tests:
-export const db = new Client({
-  connectionString: process.env.DATABASE_URL_TEST,
-});
+// import instance of your query builder, ORM, something which has `.close` or `.end` or `.destroy` method
+import db from './path-to-your-db'
 
 export const useTestDatabase = () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     patchPgForTransactions()
+    await startTransaction()
   })
-  beforeEach(async () => {
-    await startTransaction(db)
-  })
-  afterEach(async () => {
-    await rollbackTransaction(db)
-  })
-  afterAll(() => {
+  beforeEach(startTransaction)
+  afterEach(rollbackTransaction)
+  afterAll(async () => {
+    await rollbackTransaction()
     unpatchPgForTransactions()
+    await db.close()
   })
 }
 ```
 
 ## How it works
 
-Every test is wrapped in transaction:
+Every test which performs a query is wrapped into a transaction:
 
 ```ts
 test('create record', async () => {
@@ -147,6 +146,10 @@ BEGIN;
 ROLLBACK;
 ```
 
+Note that `startTransaction` in `beforeEach` hook doesn't start it immediately, but it waits for a db query to prepend it with `BEGIN` statement.
+
+As the result, if a test case doesn't perform any requests, it won't make transactions in vain.
+
 ## Parallel queries
 
 Since every test has own transaction, this library ensures that only 1 connection will be created, because single transaction requires single connection.
@@ -173,4 +176,4 @@ But it's not a bad thing, in contrary, when test code hangs this means there was
 
 Transactions are faster than truncating, but we are talking about milliseconds which doesn't really count.
 
-Main benefit is it's simpler to use. With this library you can create persisted seed data, such as record of current user to use across the tests, while if you choose truncating, you'll also need to recreate seed data for each test.
+Main benefit is that it is simpler to use. With this library you can create persisted seed data, such as record of current user to use across the tests, while if you choose truncating, you'll also need to recreate seed data for each test.

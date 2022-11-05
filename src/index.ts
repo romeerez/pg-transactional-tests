@@ -10,6 +10,7 @@ import {
 let transactionId = 0;
 let client: Client | undefined;
 let connectPromise: Promise<void> | undefined;
+let prependStartTransaction = false;
 
 const { connect, query } = Client.prototype;
 const { connect: poolConnect } = Pool.prototype;
@@ -67,6 +68,11 @@ export const patchPgForTransactions = () => {
     inputArg: string | QueryConfig | QueryArrayConfig,
     ...args: any[]
   ) {
+    if (prependStartTransaction) {
+      prependStartTransaction = false;
+      await this.query('BEGIN');
+    }
+
     let input = inputArg;
     const sql = (typeof input === 'string' ? input : input.text)
       .trim()
@@ -127,10 +133,12 @@ export const unpatchPgForTransactions = () => {
   Pool.prototype.connect = poolConnect;
 };
 
-export const startTransaction = async (db?: Client) => {
-  await (db || client)?.query('BEGIN');
+export const startTransaction = async () => {
+  prependStartTransaction = true;
 };
 
-export const rollbackTransaction = async (db?: Client) => {
-  await (db || client)?.query('ROLLBACK');
+export const rollbackTransaction = async () => {
+  if (transactionId > 0) {
+    await client?.query('ROLLBACK');
+  }
 };

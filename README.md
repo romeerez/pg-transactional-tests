@@ -10,7 +10,7 @@ This allows to focus on testing logic without thinking about clearing database, 
 
 I have a repo [ORMs overview](https://github.com/romeerez/orms-overview) where I was developing API with all ORMs mentioned above and everything was testing using this approach.
 
-This **does not** work only with Prisma because it's implementation is very different.
+This **does not** work only with Prisma because its implementation is very different.
 
 ## Get started
 
@@ -63,7 +63,8 @@ beforeEach(startTransaction);
 // rollback transaction after each test:
 afterEach(rollbackTransaction);
 
-afterEach(async () => {
+// rollback transaction after all and stop the db connection:
+afterAll(async () => {
   // rollback transaction after all tests:
   await rollbackTransaction()
   // end database connection:

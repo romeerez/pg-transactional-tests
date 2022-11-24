@@ -71,6 +71,12 @@ describe('pg-transactional-tests', () => {
     it('should still have an empty db', async () => {
       expect(await getCount()).toBe(0);
     });
+
+    it('should handle errors in pool', async () => {
+      await expect(() =>
+        pool.query('SELECT * FROM nonExistingTable'),
+      ).rejects.toThrow();
+    });
   });
 
   test('unpatch database client', () => {

@@ -13,7 +13,7 @@ let connectPromise: Promise<void> | undefined;
 let prependStartTransaction = false;
 
 const { connect, query } = Client.prototype;
-const { connect: poolConnect } = Pool.prototype;
+const { connect: poolConnect, query: poolQuery } = Pool.prototype;
 
 export const patchPgForTransactions = () => {
   Client.prototype.connect = async function (
@@ -121,6 +121,17 @@ export const patchPgForTransactions = () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (query as any).call(client, input, ...args);
   };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Pool.prototype.query = async function (...args: any[]) {
+    const client = await this.connect();
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (client as any).query(...args);
+    } finally {
+      client.release();
+    }
+  };
 };
 
 export const unpatchPgForTransactions = () => {
@@ -131,6 +142,7 @@ export const unpatchPgForTransactions = () => {
   Client.prototype.connect = connect;
   Client.prototype.query = query;
   Pool.prototype.connect = poolConnect;
+  Pool.prototype.query = poolQuery;
 };
 
 export const startTransaction = async () => {

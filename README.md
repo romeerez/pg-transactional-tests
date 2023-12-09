@@ -147,9 +147,9 @@ BEGIN;
 ROLLBACK;
 ```
 
-Note that `startTransaction` in `beforeEach` hook doesn't start it immediately, but it waits for a db query to prepend it with `BEGIN` statement.
+Note that `startTransaction` in `beforeEach` hook doesn't start it immediately, but it waits for a non-select query to prepend it with `BEGIN` statement.
 
-As the result, if a test case doesn't perform any requests, it won't make transactions in vain.
+As the result, if a test case doesn't perform inserts or updates, it won't make transactions in vain.
 
 ## Parallel queries
 

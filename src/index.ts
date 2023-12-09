@@ -57,6 +57,7 @@ export const patchPgForTransactions = () => {
   ) {
     (this as unknown as { options: PoolConfig }).options.max = 1;
     if (cb) {
+      // @ts-expect-error whatever
       poolConnect.call(this, cb);
       return undefined as unknown as Promise<PoolClient>;
     } else {
@@ -68,51 +69,55 @@ export const patchPgForTransactions = () => {
     inputArg: string | QueryConfig | QueryArrayConfig,
     ...args: any[]
   ) {
-    if (prependStartTransaction) {
-      prependStartTransaction = false;
-      await this.query('BEGIN');
-    }
-
     let input = inputArg;
     const sql = (typeof input === 'string' ? input : input.text)
       .trim()
       .toUpperCase();
-    let replacingSql: string | undefined;
 
-    if (sql.startsWith('START TRANSACTION') || sql.startsWith('BEGIN')) {
-      if (transactionId > 0) {
-        replacingSql = `SAVEPOINT "${transactionId++}"`;
-      } else {
-        transactionId = 1;
+    // Don't wrap in transactions for selects as they won't mutate
+    if (!sql.startsWith('SELECT')) {
+      let replacingSql: string | undefined;
+
+      if (prependStartTransaction) {
+        prependStartTransaction = false;
+        await this.query('BEGIN');
       }
-    } else {
-      const isCommit = sql.startsWith('COMMIT');
-      const isRollback = !isCommit && sql.startsWith('ROLLBACK');
-      if (isCommit || isRollback) {
-        if (transactionId === 0) {
-          throw new Error(
-            `Trying to ${
-              isCommit ? 'COMMIT' : 'ROLLBACK'
-            } outside of transaction`,
-          );
-        }
 
-        if (transactionId > 1) {
-          const savePoint = --transactionId;
-          replacingSql = `${
-            isCommit ? 'RELEASE' : 'ROLLBACK TO'
-          } SAVEPOINT "${savePoint}"`;
+      if (sql.startsWith('START TRANSACTION') || sql.startsWith('BEGIN')) {
+        if (transactionId > 0) {
+          replacingSql = `SAVEPOINT "${transactionId++}"`;
         } else {
-          transactionId = 0;
+          transactionId = 1;
+        }
+      } else {
+        const isCommit = sql.startsWith('COMMIT');
+        const isRollback = !isCommit && sql.startsWith('ROLLBACK');
+        if (isCommit || isRollback) {
+          if (transactionId === 0) {
+            throw new Error(
+              `Trying to ${
+                isCommit ? 'COMMIT' : 'ROLLBACK'
+              } outside of transaction`,
+            );
+          }
+
+          if (transactionId > 1) {
+            const savePoint = --transactionId;
+            replacingSql = `${
+              isCommit ? 'RELEASE' : 'ROLLBACK TO'
+            } SAVEPOINT "${savePoint}"`;
+          } else {
+            transactionId = 0;
+          }
         }
       }
-    }
 
-    if (replacingSql) {
-      if (typeof input === 'string') {
-        input = replacingSql;
-      } else {
-        input.text = replacingSql;
+      if (replacingSql) {
+        if (typeof input === 'string') {
+          input = replacingSql;
+        } else {
+          input.text = replacingSql;
+        }
       }
     }
 

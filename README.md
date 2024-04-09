@@ -45,6 +45,7 @@ import {
   patchPgForTransactions,
   startTransaction,
   rollbackTransaction,
+  close,
 } from 'pg-transactional-tests';
 
 // import instance of your query builder, ORM, something which has `.close` or `.end` or `.destroy` method
@@ -68,7 +69,7 @@ afterAll(async () => {
   // rollback transaction after all tests:
   await rollbackTransaction()
   // end database connection:
-  await db.close()
+  await close()
 });
 ```
 
@@ -81,10 +82,8 @@ import {
   patchPgForTransactions,
   startTransaction,
   rollbackTransaction,
+  close,
 } from 'pg-transactional-tests';
-
-// import instance of your query builder, ORM, something which has `.close` or `.end` or `.destroy` method
-import db from './path-to-your-db'
 
 export const useTestDatabase = () => {
   beforeAll(async () => {
@@ -96,7 +95,7 @@ export const useTestDatabase = () => {
   afterAll(async () => {
     await rollbackTransaction()
     unpatchPgForTransactions()
-    await db.close()
+    await close()
   })
 }
 ```

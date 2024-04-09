@@ -159,3 +159,5 @@ export const rollbackTransaction = async () => {
     await client?.query('ROLLBACK');
   }
 };
+
+export const close = () => client?.end();

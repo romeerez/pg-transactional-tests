@@ -12,6 +12,11 @@ I have a repo [ORMs overview](https://github.com/romeerez/orms-overview) where I
 
 This **does not** work only with Prisma because its implementation is very different.
 
+If a test doesn't perform any query, it won't start a transaction in vain.
+
+Supports testing multiple databases in parallel. Transaction state is tracked by connection parameters.
+If there are different connection parameters, it will run different transactions.
+
 ## Get started
 
 Install:
@@ -55,13 +60,13 @@ import db from './path-to-your-db'
 // so every instance of `pg` in your app becomes patched
 patchPgForTransactions();
 
-// start transaction before all tests:
+// start transaction before all tests (only when there are queries):
 beforeAll(startTransaction)
 
-// start transaction before each test:
+// start transaction before each test (only when there are queries):
 beforeEach(startTransaction);
 
-// rollback transaction after each test:
+// rollback transaction after each test (if transaction started):
 afterEach(rollbackTransaction);
 
 // rollback transaction after all and stop the db connection:

@@ -7,13 +7,36 @@ import {
   QueryConfig,
 } from 'pg';
 
-let transactionId = 0;
-let client: Client | undefined;
-let connectPromise: Promise<void> | undefined;
-let prependStartTransaction = false;
-
 const { connect, query } = Client.prototype;
 const { connect: poolConnect, query: poolQuery } = Pool.prototype;
+
+interface ConnectionParameters {
+  user: string;
+  database: string;
+  port: number;
+  host: string;
+}
+
+interface ClientWithNeededTypes extends Client {
+  connectionParameters: ConnectionParameters;
+}
+
+const getClientId = (client: Client) => {
+  const { connectionParameters: p } = client as ClientWithNeededTypes;
+  return `${p.host} ${p.port} ${p.user} ${p.database}`;
+};
+
+let prependStartTransaction = false;
+
+let clientStates: Record<
+  string,
+  {
+    transactionId: number;
+    client: Client;
+    connectPromise?: Promise<void>;
+    prependStartTransaction?: boolean;
+  }
+> = {};
 
 export const patchPgForTransactions = () => {
   Client.prototype.connect = async function (
@@ -25,27 +48,35 @@ export const patchPgForTransactions = () => {
       err: Error | undefined,
       connection?: Client,
     ) => void;
-    if (!client) client = this;
 
-    if (connectPromise) {
-      await connectPromise;
-      cb?.(undefined, client);
+    const thisId = getClientId(this);
+
+    let state = clientStates[thisId];
+    if (!state) {
+      clientStates[thisId] = state = {
+        client: this,
+        transactionId: 0,
+        prependStartTransaction,
+      };
+    }
+
+    if (state.connectPromise) {
+      await state.connectPromise;
+      cb?.(undefined, state.client);
       return;
     }
 
-    connectPromise = new Promise((resolve, reject) => {
-      connect.call(client, (err) => {
+    return (state.connectPromise = new Promise((resolve, reject) => {
+      connect.call(state.client, (err) => {
         if (err) {
           cb?.(err);
           reject(err);
         } else {
-          cb?.(undefined, client);
+          cb?.(undefined, state.client);
           resolve();
         }
       });
-    });
-
-    return connectPromise;
+    }));
   };
 
   Pool.prototype.connect = function (
@@ -69,6 +100,8 @@ export const patchPgForTransactions = () => {
     inputArg: string | QueryConfig | QueryArrayConfig,
     ...args: any[]
   ) {
+    const state = clientStates[getClientId(this)];
+
     let input = inputArg;
     const sql = (typeof input === 'string' ? input : input.text)
       .trim()
@@ -78,22 +111,22 @@ export const patchPgForTransactions = () => {
     if (!sql.startsWith('SELECT')) {
       let replacingSql: string | undefined;
 
-      if (prependStartTransaction) {
-        prependStartTransaction = false;
+      if (state.prependStartTransaction) {
+        state.prependStartTransaction = false;
         await this.query('BEGIN');
       }
 
       if (sql.startsWith('START TRANSACTION') || sql.startsWith('BEGIN')) {
-        if (transactionId > 0) {
-          replacingSql = `SAVEPOINT "${transactionId++}"`;
+        if (state.transactionId > 0) {
+          replacingSql = `SAVEPOINT "${state.transactionId++}"`;
         } else {
-          transactionId = 1;
+          state.transactionId = 1;
         }
       } else {
         const isCommit = sql.startsWith('COMMIT');
         const isRollback = !isCommit && sql.startsWith('ROLLBACK');
         if (isCommit || isRollback) {
-          if (transactionId === 0) {
+          if (state.transactionId === 0) {
             throw new Error(
               `Trying to ${
                 isCommit ? 'COMMIT' : 'ROLLBACK'
@@ -101,13 +134,13 @@ export const patchPgForTransactions = () => {
             );
           }
 
-          if (transactionId > 1) {
-            const savePoint = --transactionId;
+          if (state.transactionId > 1) {
+            const savePoint = --state.transactionId;
             replacingSql = `${
               isCommit ? 'RELEASE' : 'ROLLBACK TO'
             } SAVEPOINT "${savePoint}"`;
           } else {
-            transactionId = 0;
+            state.transactionId = 0;
           }
         }
       }
@@ -124,7 +157,7 @@ export const patchPgForTransactions = () => {
     await (Client.prototype.connect as () => Promise<void>).call(this);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (query as any).call(client, input, ...args);
+    return (query as any).call(state.client, input, ...args);
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -140,24 +173,29 @@ export const patchPgForTransactions = () => {
 };
 
 export const unpatchPgForTransactions = () => {
-  transactionId = 0;
-  client = undefined;
-  connectPromise = undefined;
-
+  clientStates = {};
   Client.prototype.connect = connect;
   Client.prototype.query = query;
   Pool.prototype.connect = poolConnect;
   Pool.prototype.query = poolQuery;
 };
 
-export const startTransaction = async () => {
+export const startTransaction = () => {
   prependStartTransaction = true;
-};
-
-export const rollbackTransaction = async () => {
-  if (transactionId > 0) {
-    await client?.query('ROLLBACK');
+  for (const state of Object.values(clientStates)) {
+    state.prependStartTransaction = true;
   }
 };
 
-export const close = () => client?.end();
+export const rollbackTransaction = () => {
+  return Promise.all(
+    Object.values(clientStates).map(async (state) => {
+      if (state.transactionId > 0) {
+        await state.client?.query('ROLLBACK');
+      }
+    }),
+  );
+};
+
+export const close = () =>
+  Promise.all(Object.values(clientStates).map((state) => state.client.end()));

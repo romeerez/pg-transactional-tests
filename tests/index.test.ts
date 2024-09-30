@@ -1,23 +1,16 @@
 import { Client, Pool } from 'pg';
-import {
-  patchPgForTransactions,
-  rollbackTransaction,
-  startTransaction,
-  unpatchPgForTransactions,
-} from '../src';
+import { testTransaction } from '../src';
 import { dbUrls } from './config';
 
 const configs = dbUrls.map((url) => ({
   connectionString: url,
-  max: 1,
+  max: 2,
 }));
 
 const clients = configs.map((config) => new Client(config));
 const pools = configs.map((config) => new Pool(config));
 const originalConnects = clients.map((client) => client.connect);
 const originalPoolConnects = pools.map((pool) => pool.connect);
-
-patchPgForTransactions();
 
 const insertSql = `INSERT INTO sample("text") VALUES ('value')`;
 
@@ -35,13 +28,10 @@ const getCounts = () => {
 
 describe('pg-transactional-tests', () => {
   describe('patch database client', () => {
-    beforeAll(startTransaction);
-    beforeEach(startTransaction);
-    afterEach(rollbackTransaction);
-    afterAll(async () => {
-      await rollbackTransaction();
-      await Promise.all(clients.map((client) => client.end()));
-    });
+    beforeAll(testTransaction.start);
+    beforeEach(testTransaction.start);
+    afterEach(testTransaction.rollback);
+    afterAll(testTransaction.close);
 
     it('should leave db empty after running this test', async () => {
       await Promise.all(clients.map((client) => client.connect()));
@@ -63,12 +53,12 @@ describe('pg-transactional-tests', () => {
 
     describe('nested describe', () => {
       beforeAll(async () => {
-        await startTransaction();
+        await testTransaction.start();
         await Promise.all(clients.map((client) => client.query(insertSql)));
       });
 
       afterAll(async () => {
-        await rollbackTransaction();
+        await testTransaction.rollback();
       });
 
       it('should have record created in beforeAll', async () => {
@@ -98,25 +88,66 @@ describe('pg-transactional-tests', () => {
         ),
       );
     });
+
+    describe('parallel transaction', () => {
+      it('should run two transactions in parallel', async () => {
+        const client = clients[0];
+
+        const error = new Error('error');
+
+        const promise1 = testTransaction.parallel(async () => {
+          await client.query(`SELECT 1 value`);
+          throw error;
+        });
+
+        const promise2 = testTransaction.parallel(async () => {
+          const {
+            rows: [{ value }],
+          } = await client.query(`SELECT 1 value`);
+
+          return value;
+        });
+
+        const results = await Promise.allSettled([promise1, promise2]);
+
+        expect(results).toEqual([
+          {
+            status: 'rejected',
+            reason: error,
+          },
+          {
+            status: 'fulfilled',
+            value: 1,
+          },
+        ]);
+      });
+    });
   });
 
-  test('unpatch database client', () => {
-    clients.forEach((client, i) =>
-      expect(client.connect).not.toBe(originalConnects[i]),
-    );
+  describe('unpatch database client', () => {
+    describe('patch in start', () => {
+      beforeAll(testTransaction.start);
+      afterAll(testTransaction.rollback);
 
-    pools.forEach((pool, i) =>
-      expect(pool.connect).not.toBe(originalPoolConnects[i]),
-    );
+      it('should be patched', () => {
+        clients.forEach((client, i) =>
+          expect(client.connect).not.toBe(originalConnects[i]),
+        );
 
-    unpatchPgForTransactions();
+        pools.forEach((pool, i) =>
+          expect(pool.connect).not.toBe(originalPoolConnects[i]),
+        );
+      });
+    });
 
-    clients.forEach((client, i) =>
-      expect(client.connect).toBe(originalConnects[i]),
-    );
+    it('should be unpatched by rollback', () => {
+      clients.forEach((client, i) =>
+        expect(client.connect).toBe(originalConnects[i]),
+      );
 
-    pools.forEach((pool, i) =>
-      expect(pool.connect).toBe(originalPoolConnects[i]),
-    );
+      pools.forEach((pool, i) =>
+        expect(pool.connect).toBe(originalPoolConnects[i]),
+      );
+    });
   });
 });

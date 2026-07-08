@@ -13,6 +13,20 @@ const originalConnects = clients.map((client) => client.connect);
 const originalPoolConnects = pools.map((pool) => pool.connect);
 
 const insertSql = `INSERT INTO sample("text") VALUES ('value')`;
+const insertWithSleepSql = `INSERT INTO sample("text") SELECT $1 FROM pg_sleep(0.05)`;
+const pgClientQueryWarning =
+  'Calling client.query() when the client is already executing a query is deprecated';
+
+const failOnPgClientQueryWarning = () =>
+  jest.spyOn(process, 'emitWarning').mockImplementation(((
+    warning: string | Error,
+  ) => {
+    const message = warning instanceof Error ? warning.message : warning;
+
+    if (typeof message === 'string' && message.includes(pgClientQueryWarning)) {
+      throw new Error(message);
+    }
+  }) as typeof process.emitWarning);
 
 const getCounts = () => {
   return Promise.all(
@@ -27,6 +41,38 @@ const getCounts = () => {
 };
 
 describe('pg-transactional-tests', () => {
+  describe('single started transaction', () => {
+    afterEach(testTransaction.close);
+
+    it('should start the transaction before concurrent queued queries', async () => {
+      const setupClient = new Client(configs[0]);
+      const client = new Client(configs[0]);
+      const emitWarning = failOnPgClientQueryWarning();
+
+      try {
+        await setupClient.connect();
+        await setupClient.query('TRUNCATE sample');
+
+        testTransaction.start();
+
+        await Promise.all([
+          client.query(insertWithSleepSql, ['single-a']),
+          client.query(insertWithSleepSql, ['single-b']),
+        ]);
+
+        await testTransaction.rollback();
+
+        const {
+          rows: [{ count: countAfterRollback }],
+        } = await setupClient.query('SELECT count(*) FROM sample');
+        expect(+countAfterRollback).toBe(0);
+      } finally {
+        emitWarning.mockRestore();
+        await Promise.allSettled([setupClient.end(), client.end()]);
+      }
+    });
+  });
+
   describe('patch database client', () => {
     beforeAll(testTransaction.start);
     beforeEach(testTransaction.start);
@@ -49,6 +95,50 @@ describe('pg-transactional-tests', () => {
 
     it('should have an empty db now', async () => {
       expect(await getCounts()).toEqual([0, 0]);
+    });
+
+    it('should serialize concurrent queries on the transaction client', async () => {
+      const emitWarning = failOnPgClientQueryWarning();
+
+      try {
+        await clients[0].connect();
+        await Promise.all([
+          clients[0].query(insertWithSleepSql, ['a']),
+          clients[0].query(insertWithSleepSql, ['b']),
+        ]);
+      } finally {
+        emitWarning.mockRestore();
+      }
+
+      expect(await getCounts()).toEqual([2, 0]);
+
+      await testTransaction.rollback();
+      expect(await getCounts()).toEqual([0, 0]);
+      testTransaction.start();
+    });
+
+    it('should serialize concurrent callback queries on the transaction client', async () => {
+      const emitWarning = failOnPgClientQueryWarning();
+
+      const insert = (value: string) =>
+        new Promise((resolve, reject) => {
+          clients[0].query(insertWithSleepSql, [value], (err, result) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(result);
+            }
+          });
+        });
+
+      try {
+        await clients[0].connect();
+        await Promise.all([insert('callback-a'), insert('callback-b')]);
+      } finally {
+        emitWarning.mockRestore();
+      }
+
+      expect(await getCounts()).toEqual([2, 0]);
     });
 
     describe('nested describe', () => {

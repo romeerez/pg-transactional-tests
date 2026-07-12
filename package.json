@@ -1,6 +1,6 @@
 {
   "name": "pg-transactional-tests",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Wraps each test in transaction for `pg` package",
   "repository": "https://github.com/romeerez/pg-transactional-tests",
   "main": "dist/index.js",
@@ -43,7 +43,7 @@
     "prettier": "^2.7.1",
     "rake-db": "2.22.41",
     "tsx": "^4.19.1",
-    "typescript": "^4.7.4"
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "pg": "*"

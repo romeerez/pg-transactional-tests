@@ -162,8 +162,7 @@ function patchedPoolConnect(
 ): Promise<PoolClient> {
   (this as unknown as { options: PoolConfig }).options.max = 1;
   if (cb) {
-    // @ts-expect-error whatever
-    poolConnect.call(this, cb);
+    poolConnect.call(this, cb as never);
     return undefined as unknown as Promise<PoolClient>;
   } else {
     return (poolConnect as () => Promise<PoolClient>).call(this);

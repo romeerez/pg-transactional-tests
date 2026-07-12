@@ -40,7 +40,8 @@ let clientStates: Record<
   {
     transactionId: number;
     client: Client;
-    connectPromise?: Promise<void>;
+    connectPromise?: Promise<Client>;
+    queryPromise: Promise<void>;
     prependStartTransaction?: boolean;
   }
 > = {};
@@ -67,6 +68,7 @@ const getState = (self: Client) => {
     clientStates[thisId] = state = {
       client,
       transactionId: 0,
+      queryPromise: Promise.resolve(),
       prependStartTransaction,
     };
   }
@@ -74,29 +76,83 @@ const getState = (self: Client) => {
   return state;
 };
 
+type ClientState = ReturnType<typeof getState>;
+
+const queueQuery = (
+  state: ClientState,
+  self: Client,
+  input: string | QueryConfig | QueryArrayConfig,
+  args: any[],
+) => {
+  const run = async () => {
+    await (Client.prototype.connect as unknown as () => Promise<Client>).call(
+      self,
+    );
+
+    const callbackIndex = args.findIndex((arg) => typeof arg === 'function');
+
+    if (callbackIndex === -1) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (query as any).call(state.client, input, ...args);
+    }
+
+    return new Promise((resolve, reject) => {
+      const queuedArgs = [...args];
+      const callback = queuedArgs[callbackIndex] as (
+        err: Error | undefined,
+        result?: unknown,
+      ) => void;
+
+      queuedArgs[callbackIndex] = (
+        err: Error | undefined,
+        result?: unknown,
+      ) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+
+        callback(err, result);
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (query as any).call(state.client, input, ...queuedArgs);
+    });
+  };
+
+  const queryPromise = state.queryPromise.then(run, run);
+  state.queryPromise = queryPromise.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  return queryPromise;
+};
+
 async function patchedConnect(
   this: Client,
-  callback?: (err: Error) => void,
-): Promise<void> {
+  callback?: (err: Error | undefined, connection?: Client) => void,
+): Promise<Client> {
   // @types/pg says there is no second parameter, but actually pg itself relies on it
   const cb = callback as (err: Error | undefined, connection?: Client) => void;
 
   const state = getState(this);
 
   if (state.connectPromise) {
-    await state.connectPromise;
-    cb?.(undefined, state.client);
-    return;
+    const client = await state.connectPromise;
+    cb?.(undefined, client);
+    return client;
   }
 
   return (state.connectPromise = new Promise((resolve, reject) => {
-    connect.call(state.client, (err) => {
+    connect.call(state.client, (err: Error | undefined) => {
       if (err) {
         cb?.(err);
         reject(err);
       } else {
         cb?.(undefined, state.client);
-        resolve();
+        resolve(state.client);
       }
     });
   }));
@@ -134,7 +190,16 @@ async function patchedQuery(
 
     if (state.prependStartTransaction) {
       state.prependStartTransaction = false;
-      await this.query('BEGIN');
+      const startSql =
+        state.transactionId > 0
+          ? `SAVEPOINT "${state.transactionId++}"`
+          : 'BEGIN';
+
+      if (state.transactionId === 0) {
+        state.transactionId = 1;
+      }
+
+      await queueQuery(state, this, startSql, []);
     }
 
     if (sql.startsWith('START TRANSACTION') || sql.startsWith('BEGIN')) {
@@ -175,10 +240,7 @@ async function patchedQuery(
     }
   }
 
-  await (Client.prototype.connect as () => Promise<void>).call(this);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (query as any).call(state.client, input, ...args);
+  return queueQuery(state, this, input, args);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -196,7 +258,8 @@ let started = 0;
 
 export const testTransaction = {
   patch() {
-    Client.prototype.connect = patchedConnect;
+    Client.prototype.connect =
+      patchedConnect as typeof Client.prototype.connect;
     Pool.prototype.connect = patchedPoolConnect;
     Client.prototype.query = patchedQuery;
     Pool.prototype.query = patchedPoolQuery;
@@ -213,7 +276,7 @@ export const testTransaction = {
   start() {
     started++;
 
-    if (Client.prototype.connect !== patchedConnect) {
+    if ((Client.prototype.connect as unknown) !== patchedConnect) {
       testTransaction.patch();
     }
 

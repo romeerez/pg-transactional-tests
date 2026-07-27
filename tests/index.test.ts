@@ -141,6 +141,34 @@ describe('pg-transactional-tests', () => {
       expect(await getCounts()).toEqual([2, 0]);
     });
 
+    it('should report callback query errors only through the callback', async () => {
+      const unhandledRejections: unknown[] = [];
+      const onUnhandledRejection = (reason: unknown) => {
+        unhandledRejections.push(reason);
+      };
+
+      process.on('unhandledRejection', onUnhandledRejection);
+
+      try {
+        const error = await new Promise<Error>((resolve, reject) => {
+          clients[0].query('SELECT * FROM nonExistingTable', (queryError) => {
+            if (queryError) {
+              resolve(queryError);
+            } else {
+              reject(new Error('Expected the query to fail'));
+            }
+          });
+        });
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(error).toBeInstanceOf(Error);
+        expect(unhandledRejections).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandledRejection);
+      }
+    });
+
     describe('nested describe', () => {
       beforeAll(async () => {
         await testTransaction.start();

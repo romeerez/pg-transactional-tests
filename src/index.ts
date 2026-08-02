@@ -96,7 +96,7 @@ const queueQuery = (
       return (query as any).call(state.client, input, ...args);
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const queuedArgs = [...args];
       const callback = queuedArgs[callbackIndex] as (
         err: Error | undefined,
@@ -107,13 +107,11 @@ const queueQuery = (
         err: Error | undefined,
         result?: unknown,
       ) => {
-        if (err) {
-          reject(err);
-        } else {
+        try {
+          callback(err, result);
+        } finally {
           resolve(result);
         }
-
-        callback(err, result);
       };
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -259,7 +257,7 @@ let started = 0;
 export const testTransaction = {
   patch() {
     Client.prototype.connect =
-      patchedConnect as typeof Client.prototype.connect;
+      patchedConnect as unknown as typeof Client.prototype.connect;
     Pool.prototype.connect = patchedPoolConnect;
     Client.prototype.query = patchedQuery;
     Pool.prototype.query = patchedPoolQuery;
